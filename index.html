@@ -1,212 +1,1492 @@
-from pathlib import Path
-
-html = r"""<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Horta ONG - Dashboard  Completo</title>
-
+<title>Horta ONG – Dashboard Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 <style>
+/* ===== TOKENS ===== */
 :root{
---bg:#eef7f0;--card:#fff;--text:#263238;--primary:#2d7a3a;
+  --bg:#0d1117;--surface:#161b22;--surface2:#1c2333;--surface3:#21262d;
+  --border:#30363d;--text:#e6edf3;--text2:#8b949e;--text3:#6e7681;
+  --green:#3fb950;--green-dim:#238636;--green-glow:rgba(63,185,80,.18);
+  --teal:#39d353;--yellow:#f0b429;--red:#f85149;--blue:#58a6ff;--purple:#a371f7;
+  --sidebar:220px;--header:56px;--radius:10px;--mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
 }
-.dark{--bg:#111827;--card:#1f2937;--text:#f3f4f6;--primary:#4ade80;}
-body{margin:0;font-family:Segoe UI;background:var(--bg);color:var(--text)}
-header{background:var(--primary);color:#fff;padding:15px;display:flex;justify-content:space-between}
-main{padding:20px;max-width:1400px;margin:auto}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:15px}
-.card{background:var(--card);padding:15px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
-.stat{font-size:2rem;font-weight:bold}
-button{padding:10px;border:none;border-radius:8px;cursor:pointer}
-#log{height:180px;overflow:auto;background:#000;color:#0f0;padding:10px;font-family:monospace}
-table{width:100%;border-collapse:collapse}
-td,th{border:1px solid #ccc;padding:6px}
+.light-theme{
+  --bg:#f0f4f0;--surface:#fff;--surface2:#f6f8f6;--surface3:#eaf1ea;
+  --border:#d0dbd0;--text:#1a2a1a;--text2:#4a6a4a;--text3:#7a9a7a;
+  --green:#2d7a3a;--green-dim:#1e5e28;--green-glow:rgba(45,122,58,.12);
+}
+
+/* ===== RESET ===== */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;transition:background .3s,color .3s}
+a{color:inherit;text-decoration:none}
+button{font-family:var(--sans);cursor:pointer;border:none;outline:none}
+input,select,textarea{font-family:var(--sans);outline:none}
+ul{list-style:none}
+
+/* ===== LAYOUT ===== */
+#app{display:flex;height:100vh;overflow:hidden}
+
+/* ===== SIDEBAR ===== */
+#sidebar{
+  width:var(--sidebar);min-width:var(--sidebar);
+  background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;transition:width .3s;overflow:hidden;z-index:100
+}
+#sidebar.collapsed{width:56px;min-width:56px}
+.sb-logo{
+  height:var(--header);display:flex;align-items:center;gap:10px;
+  padding:0 16px;border-bottom:1px solid var(--border);flex-shrink:0;
+  white-space:nowrap;overflow:hidden
+}
+.sb-logo-icon{font-size:22px}
+.sb-logo-text{font-weight:700;font-size:15px;color:var(--green);letter-spacing:.5px}
+.sb-nav{flex:1;padding:12px 8px;overflow-y:auto;overflow-x:hidden}
+.sb-section{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--text3);padding:8px 8px 4px;white-space:nowrap;overflow:hidden}
+.sb-item{
+  display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;
+  cursor:pointer;transition:background .15s;white-space:nowrap;overflow:hidden;
+  color:var(--text2);font-size:14px;font-weight:500;margin-bottom:2px
+}
+.sb-item:hover{background:var(--surface2);color:var(--text)}
+.sb-item.active{background:var(--green-glow);color:var(--green)}
+.sb-icon{font-size:17px;flex-shrink:0;width:20px;text-align:center}
+.sb-label{overflow:hidden;text-overflow:ellipsis}
+.sb-footer{padding:12px;border-top:1px solid var(--border);flex-shrink:0}
+.sb-toggle{width:100%;background:var(--surface2);color:var(--text2);border-radius:8px;padding:8px;font-size:12px;border:1px solid var(--border)}
+.sb-toggle:hover{background:var(--surface3)}
+
+/* ===== MAIN ===== */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* ===== HEADER ===== */
+#topbar{
+  height:var(--header);background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0
+}
+.tb-title{font-size:15px;font-weight:600;color:var(--text)}
+.tb-actions{display:flex;gap:8px;align-items:center}
+.tb-btn{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text2);
+  padding:6px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:6px;
+  transition:background .15s,color .15s
+}
+.tb-btn:hover{background:var(--surface3);color:var(--text)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--red);transition:background .3s}
+.status-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-label{font-size:12px;color:var(--text2);font-family:var(--mono)}
+
+/* ===== CONTENT ===== */
+#content{flex:1;overflow-y:auto;padding:20px}
+
+/* ===== PAGES ===== */
+.page{display:none;animation:fadeIn .2s ease}
+.page.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ===== CARDS ===== */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
+.card-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.card-title span{font-size:16px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.grid-auto{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+
+/* ===== STAT CARDS ===== */
+.stat-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px;display:flex;flex-direction:column;gap:6px;position:relative;overflow:hidden
+}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--green)}
+.stat-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:var(--text3)}
+.stat-value{font-size:28px;font-weight:700;font-family:var(--mono);color:var(--text);line-height:1}
+.stat-sub{font-size:11px;color:var(--text3);font-family:var(--mono)}
+.stat-badge{
+  position:absolute;top:14px;right:14px;font-size:20px;
+  width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+  background:var(--surface2);border-radius:8px
+}
+
+/* ===== LEVEL RING ===== */
+.level-ring-wrap{display:flex;flex-direction:column;align-items:center;gap:6px}
+.level-ring{position:relative;width:120px;height:120px}
+.level-ring svg{transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:var(--surface3);stroke-width:10}
+.ring-fill{fill:none;stroke:var(--green);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset 1s ease;stroke-dasharray:283;stroke-dashoffset:283}
+.ring-text{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring-pct{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green)}
+.ring-label{font-size:10px;color:var(--text3)}
+
+/* ===== GAUGE BAR ===== */
+.gauge-bar{height:8px;background:var(--surface3);border-radius:4px;overflow:hidden;margin:6px 0}
+.gauge-fill{height:100%;background:var(--green);border-radius:4px;transition:width .8s ease}
+
+/* ===== TABLE ===== */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead tr{border-bottom:1px solid var(--border)}
+th{padding:8px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)}
+td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+
+/* ===== BADGES ===== */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;font-family:var(--mono)}
+.badge-green{background:rgba(63,185,80,.15);color:var(--green)}
+.badge-red{background:rgba(248,81,73,.15);color:var(--red)}
+.badge-yellow{background:rgba(240,180,41,.15);color:var(--yellow)}
+.badge-blue{background:rgba(88,166,255,.15);color:var(--blue)}
+.badge-purple{background:rgba(163,113,247,.15);color:var(--purple)}
+
+/* ===== FORMS ===== */
+.form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.form-group{display:flex;flex-direction:column;gap:5px;flex:1;min-width:140px}
+.form-label{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.form-control{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:8px 12px;border-radius:8px;font-size:13px;transition:border-color .15s;width:100%
+}
+.form-control:focus{border-color:var(--green)}
+.form-control option{background:var(--surface)}
+
+/* ===== BUTTONS ===== */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;transition:all .15s;cursor:pointer}
+.btn-primary{background:var(--green-dim);color:#fff;border:1px solid var(--green)}
+.btn-primary:hover{background:var(--green);box-shadow:0 0 12px var(--green-glow)}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--surface3)}
+.btn-danger{background:rgba(248,81,73,.1);color:var(--red);border:1px solid rgba(248,81,73,.3)}
+.btn-danger:hover{background:rgba(248,81,73,.2)}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-icon{width:32px;height:32px;padding:0;justify-content:center;font-size:15px}
+
+/* ===== LOG TERMINAL ===== */
+#logContainer{
+  background:#000;color:#0f0;font-family:var(--mono);font-size:12px;
+  padding:12px;border-radius:8px;height:220px;overflow-y:auto;border:1px solid #1a3a1a
+}
+#logContainer .log-info{color:#0f0}
+#logContainer .log-warn{color:var(--yellow)}
+#logContainer .log-err{color:var(--red)}
+#logContainer .log-mqtt{color:var(--blue)}
+
+/* ===== SECTION HEADER ===== */
+.sec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.sec-title{font-size:16px;font-weight:600;color:var(--text)}
+
+/* ===== MODAL ===== */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;
+  align-items:center;justify-content:center;backdrop-filter:blur(3px)
+}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;width:460px;max-width:95vw;animation:fadeIn .2s ease}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center}
+.modal-close{background:none;color:var(--text2);font-size:20px;border:none;cursor:pointer}
+.modal-close:hover{color:var(--text)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+
+/* ===== TOAST ===== */
+#toastContainer{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:2000}
+.toast{
+  background:var(--surface);border:1px solid var(--border);padding:12px 18px;border-radius:10px;
+  font-size:13px;display:flex;align-items:center;gap:8px;animation:slideIn .2s ease;
+  box-shadow:0 4px 20px rgba(0,0,0,.3)
+}
+@keyframes slideIn{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}
+.toast-success{border-color:var(--green);color:var(--green)}
+.toast-error{border-color:var(--red);color:var(--red)}
+.toast-info{border-color:var(--blue);color:var(--blue)}
+
+/* ===== RSSI SIGNAL ===== */
+.signal-bars{display:flex;align-items:flex-end;gap:2px;height:20px}
+.signal-bar{width:5px;border-radius:2px;background:var(--surface3)}
+.signal-bar.active{background:var(--green)}
+
+/* ===== CHART CONTAINER ===== */
+.chart-wrap{position:relative;height:180px}
+
+/* ===== AGENDA ===== */
+.agenda-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px;
+  border:1px solid var(--border)
+}
+.agenda-time{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--green)}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:900px){
+  .grid-4{grid-template-columns:repeat(2,1fr)}
+  .grid-3{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+  .grid-4,.grid-3,.grid-2{grid-template-columns:1fr}
+  #sidebar{position:fixed;height:100%;transform:translateX(-100%)}
+  #sidebar.mobile-open{transform:none}
+}
+
+/* ===== SWITCH ===== */
+.switch{position:relative;display:inline-block;width:44px;height:24px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:var(--surface3);border-radius:24px;transition:.3s}
+.slider:before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+input:checked+.slider{background:var(--green)}
+input:checked+.slider:before{transform:translateX(20px)}
+
+/* ===== WIFI ICON ===== */
+.wifi-icon{font-size:20px}
+
+/* SETTINGS */
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:none}
+.settings-info{}
+.settings-label{font-size:13px;font-weight:500}
+.settings-desc{font-size:12px;color:var(--text3);margin-top:2px}
 </style>
 </head>
 <body>
 
-<header>
-<div>🌱 Horta ONG - Dashboard Completo</div>
-<div>
-<button onclick="toggleTheme()">🌙 Tema</button>
+<div id="app">
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar">
+  <div class="sb-logo">
+    <span class="sb-logo-icon">🌱</span>
+    <span class="sb-logo-text">Horta ONG</span>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section">Principal</div>
+    <div class="sb-item active" data-page="dashboard" onclick="navTo('dashboard',this)">
+      <span class="sb-icon">📊</span><span class="sb-label">Dashboard</span>
+    </div>
+    <div class="sb-item" data-page="esps" onclick="navTo('esps',this)">
+      <span class="sb-icon">📡</span><span class="sb-label">ESPs</span>
+    </div>
+    <div class="sb-item" data-page="controle" onclick="navTo('controle',this)">
+      <span class="sb-icon">🎛️</span><span class="sb-label">Controle</span>
+    </div>
+    <div class="sb-item" data-page="agenda" onclick="navTo('agenda',this)">
+      <span class="sb-icon">🗓️</span><span class="sb-label">Agendamentos</span>
+    </div>
+
+    <div class="sb-section">Análise</div>
+    <div class="sb-item" data-page="graficos" onclick="navTo('graficos',this)">
+      <span class="sb-icon">📈</span><span class="sb-label">Gráficos</span>
+    </div>
+    <div class="sb-item" data-page="historico" onclick="navTo('historico',this)">
+      <span class="sb-icon">🗃️</span><span class="sb-label">Histórico</span>
+    </div>
+    <div class="sb-item" data-page="relatorios" onclick="navTo('relatorios',this)">
+      <span class="sb-icon">📄</span><span class="sb-label">Relatórios</span>
+    </div>
+
+    <div class="sb-section">Sistema</div>
+    <div class="sb-item" data-page="logs" onclick="navTo('logs',this)">
+      <span class="sb-icon">🖥️</span><span class="sb-label">Logs</span>
+    </div>
+    <div class="sb-item" data-page="config" onclick="navTo('config',this)">
+      <span class="sb-icon">⚙️</span><span class="sb-label">Configurações</span>
+    </div>
+  </div>
+  <div class="sb-footer">
+    <button class="sb-toggle" onclick="toggleSidebar()">◀ Recolher</button>
+  </div>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<div id="main">
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="tb-title" id="pageTitle">Dashboard</div>
+    <div class="tb-actions">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="status-dot" id="mqttDot"></div>
+        <span class="status-label" id="mqttStatus">Desconectado</span>
+      </div>
+      <button class="tb-btn" onclick="toggleTheme()">🌙 Tema</button>
+      <button class="tb-btn" onclick="connectMQTT()">🔌 Conectar</button>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div id="content">
+
+    <!-- ===== PAGE: DASHBOARD ===== -->
+    <div class="page active" id="pg-dashboard">
+      <div class="grid-4" style="margin-bottom:14px">
+        <div class="stat-card">
+          <span class="stat-badge">💧</span>
+          <div class="stat-label">Nível Reservatório</div>
+          <div class="stat-value" id="s-nivel">—</div>
+          <div class="stat-sub" id="s-nivel-sub">aguardando dados</div>
+          <div class="gauge-bar"><div class="gauge-fill" id="g-nivel" style="width:0%"></div></div>
+        </div>
+        <div class="stat-card" style="--c:var(--blue)">
+          <span class="stat-badge">📅</span>
+          <div class="stat-label">Consumo Diário</div>
+          <div class="stat-value" id="s-dia">—</div>
+          <div class="stat-sub">litros hoje</div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-badge">📆</span>
+          <div class="stat-label">Consumo Semanal</div>
+          <div class="stat-value" id="s-sem">—</div>
+          <div class="stat-sub">litros esta semana</div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-badge">🗓️</span>
+          <div class="stat-label">Consumo Mensal</div>
+          <div class="stat-value" id="s-mes">—</div>
+          <div class="stat-sub">litros este mês</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:14px">
+        <!-- Level ring + network stats -->
+        <div class="card">
+          <div class="card-title"><span>🔬</span> Status em Tempo Real</div>
+          <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+            <div class="level-ring-wrap">
+              <div class="level-ring">
+                <svg width="120" height="120" viewBox="0 0 120 120">
+                  <circle class="ring-bg" cx="60" cy="60" r="45"/>
+                  <circle class="ring-fill" id="ring-fill" cx="60" cy="60" r="45"/>
+                </svg>
+                <div class="ring-text">
+                  <div class="ring-pct" id="ring-pct">0%</div>
+                  <div class="ring-label">NÍVEL</div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text2)">RSSI</span>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="signal-bars" id="signal-bars">
+                    <div class="signal-bar" style="height:5px"></div>
+                    <div class="signal-bar" style="height:9px"></div>
+                    <div class="signal-bar" style="height:13px"></div>
+                    <div class="signal-bar" style="height:17px"></div>
+                  </div>
+                  <span class="badge badge-green" id="s-rssi">—</span>
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text2)">Wi-Fi</span>
+                <span class="badge badge-blue" id="s-wifi">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text2)">IP</span>
+                <span class="badge badge-purple" id="s-ip">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text2)">Uptime</span>
+                <span class="badge badge-yellow" id="s-uptime">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text2)">ESP Ativo</span>
+                <span class="badge badge-green" id="s-esp">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mini chart -->
+        <div class="card">
+          <div class="card-title"><span>📈</span> Nível (Últimas Leituras)</div>
+          <div class="chart-wrap"><canvas id="miniChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- ESP overview table -->
+      <div class="card">
+        <div class="card-title"><span>📡</span> Visão Geral dos ESPs</div>
+        <div class="tbl-wrap">
+          <table id="dash-esp-table">
+            <thead><tr><th>ID</th><th>Status</th><th>RSSI</th><th>IP</th><th>Wi-Fi</th><th>Uptime</th><th>Ações</th></tr></thead>
+            <tbody id="dash-esp-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: ESPs ===== -->
+    <div class="page" id="pg-esps">
+      <div class="sec-header">
+        <div class="sec-title">Gerenciamento de ESPs</div>
+        <button class="btn btn-primary" onclick="openEspModal()">+ Adicionar ESP</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>ID / Nome</th><th>Tópico MQTT</th><th>Status</th><th>RSSI</th><th>IP</th><th>Wi-Fi</th><th>Uptime</th><th>Última Mensagem</th><th>Ações</th></tr></thead>
+            <tbody id="esps-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: CONTROLE ===== -->
+    <div class="page" id="pg-controle">
+      <div class="sec-header"><div class="sec-title">Controle Manual</div></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>🎛️</span> Controle de Irrigação</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">ESP Alvo</label>
+              <select class="form-control" id="ctrl-esp"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Duração (min)</label>
+              <select class="form-control" id="ctrl-dur">
+                <option value="1">1 minuto</option>
+                <option value="5" selected>5 minutos</option>
+                <option value="10">10 minutos</option>
+                <option value="15">15 minutos</option>
+                <option value="30">30 minutos</option>
+                <option value="60">60 minutos</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="sendCmd('ligar')">💧 Ligar</button>
+            <button class="btn btn-danger" onclick="sendCmd('desligar')">🛑 Desligar</button>
+            <button class="btn btn-secondary" onclick="sendCmd('status')">📊 Solicitar Status</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>📡</span> Envio MQTT Personalizado</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Tópico</label>
+              <input class="form-control" id="custom-topic" placeholder="horta/esp01/cmd">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Payload</label>
+              <input class="form-control" id="custom-payload" placeholder='{"acao":"ligar","duracao":5}'>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="sendCustom()">📤 Enviar</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title"><span>⚡</span> Status da Bomba por ESP</div>
+        <div class="grid-auto" id="pump-status-grid"></div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: AGENDA ===== -->
+    <div class="page" id="pg-agenda">
+      <div class="sec-header">
+        <div class="sec-title">Agendamentos</div>
+        <button class="btn btn-primary" onclick="openAgendaModal()">+ Novo Agendamento</button>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>🗓️</span> Agendamentos Ativos</div>
+          <div id="agenda-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>📋</span> Próximas Execuções</div>
+          <div id="proximas-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: GRÁFICOS ===== -->
+    <div class="page" id="pg-graficos">
+      <div class="sec-header"><div class="sec-title">Análise de Gráficos</div></div>
+      <div class="grid-2" style="margin-bottom:14px">
+        <div class="card">
+          <div class="card-title"><span>💧</span> Nível ao Longo do Tempo</div>
+          <div class="chart-wrap"><canvas id="nivelChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>📶</span> RSSI ao Longo do Tempo</div>
+          <div class="chart-wrap"><canvas id="rssiChart"></canvas></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>📊</span> Consumo Diário (7 dias)</div>
+          <div class="chart-wrap"><canvas id="consChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>🍩</span> Status dos ESPs</div>
+          <div class="chart-wrap"><canvas id="espStatusChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: HISTÓRICO ===== -->
+    <div class="page" id="pg-historico">
+      <div class="sec-header">
+        <div class="sec-title">Histórico de Leituras</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="clearHistorico()">🗑️ Limpar</button>
+          <button class="btn btn-primary" onclick="exportExcel()">📥 Excel</button>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <input class="form-control" style="max-width:200px" id="hist-filter-esp" placeholder="Filtrar por ESP">
+          <input class="form-control" type="date" style="max-width:160px" id="hist-filter-date">
+          <button class="btn btn-secondary" onclick="renderHistorico()">🔍 Filtrar</button>
+          <button class="btn btn-secondary" onclick="clearHistFilter()">✕ Limpar</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Data/Hora</th><th>ESP</th><th>Nível %</th><th>RSSI</th><th>IP</th><th>Wi-Fi</th><th>Uptime</th><th>Evento</th></tr></thead>
+            <tbody id="hist-tbody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text3)" id="hist-count"></div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: RELATÓRIOS ===== -->
+    <div class="page" id="pg-relatorios">
+      <div class="sec-header"><div class="sec-title">Relatórios</div></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>📄</span> Relatório PDF</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Gera relatório completo com estatísticas, tabela de leituras e gráfico resumo.</p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Período</label>
+              <select class="form-control" id="pdf-period">
+                <option value="today">Hoje</option>
+                <option value="week" selected>Esta Semana</option>
+                <option value="month">Este Mês</option>
+                <option value="all">Todo o Histórico</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="exportPDF()">📄 Gerar PDF</button>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>📊</span> Exportar Excel</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Exporta planilha com abas de histórico, ESPs e agendamentos.</p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Incluir</label>
+              <select class="form-control" id="excel-scope">
+                <option value="all">Tudo</option>
+                <option value="hist">Apenas Histórico</option>
+                <option value="esps">Apenas ESPs</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="exportExcelFull()">📥 Gerar Excel</button>
+        </div>
+      </div>
+
+      <!-- Estatísticas -->
+      <div class="card" style="margin-top:14px">
+        <div class="card-title"><span>📉</span> Estatísticas</div>
+        <div class="grid-4">
+          <div><div style="font-size:11px;color:var(--text3)">Hoje</div><div style="font-family:var(--mono);font-size:20px;font-weight:700" id="stat-dia2">—</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Semana</div><div style="font-family:var(--mono);font-size:20px;font-weight:700" id="stat-sem2">—</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Mês</div><div style="font-family:var(--mono);font-size:20px;font-weight:700" id="stat-mes2">—</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Total Registros</div><div style="font-family:var(--mono);font-size:20px;font-weight:700" id="stat-total">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: LOGS ===== -->
+    <div class="page" id="pg-logs">
+      <div class="sec-header">
+        <div class="sec-title">Logs do Sistema</div>
+        <div style="display:flex;gap:8px">
+          <select class="form-control" style="width:130px" id="log-filter">
+            <option value="">Todos</option>
+            <option value="INFO">INFO</option>
+            <option value="WARN">WARN</option>
+            <option value="ERROR">ERROR</option>
+            <option value="MQTT">MQTT</option>
+          </select>
+          <button class="btn btn-secondary" onclick="clearLogs()">🗑️ Limpar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div id="logContainer"></div>
+      </div>
+    </div>
+
+    <!-- ===== PAGE: CONFIG ===== -->
+    <div class="page" id="pg-config">
+      <div class="sec-header"><div class="sec-title">Configurações</div></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>📡</span> Conexão MQTT</div>
+          <div class="form-row"><div class="form-group">
+            <label class="form-label">Host / Broker</label>
+            <input class="form-control" id="cfg-host" placeholder="broker.exemplo.com">
+          </div></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Porta (WSS)</label>
+              <input class="form-control" id="cfg-port" type="number" placeholder="8883">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Protocolo</label>
+              <select class="form-control" id="cfg-proto">
+                <option value="wss">WSS (seguro)</option>
+                <option value="ws">WS</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Usuário</label>
+              <input class="form-control" id="cfg-user" placeholder="usuario">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Senha</label>
+              <input class="form-control" id="cfg-pass" type="password" placeholder="••••••••">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Tópico Base</label>
+              <input class="form-control" id="cfg-topic" placeholder="horta">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="saveMQTTConfig()">💾 Salvar</button>
+            <button class="btn btn-secondary" onclick="connectMQTT()">🔌 Conectar</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span>🎨</span> Aparência & Sistema</div>
+          <div class="settings-row">
+            <div class="settings-info">
+              <div class="settings-label">Tema Escuro</div>
+              <div class="settings-desc">Alterna entre tema claro e escuro</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfg-dark" onchange="applyTheme()"><span class="slider"></span></label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-info">
+              <div class="settings-label">Log Persistente</div>
+              <div class="settings-desc">Salva logs no localStorage</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfg-logpersist" checked><span class="slider"></span></label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-info">
+              <div class="settings-label">Alertas de Nível Baixo</div>
+              <div class="settings-desc">Notifica quando nível &lt; 20%</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfg-alerts" checked><span class="slider"></span></label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-info">
+              <div class="settings-label">Limpar Histórico</div>
+              <div class="settings-desc">Remove todos os registros salvos</div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="clearHistorico()">Limpar</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-info">
+              <div class="settings-label">Versão</div>
+            </div>
+            <span class="badge badge-green">v2.0.0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ===== MODALS ===== -->
+<!-- Modal: ESP -->
+<div class="modal-overlay" id="modal-esp">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="esp-modal-title">Adicionar ESP</span>
+      <button class="modal-close" onclick="closeModal('modal-esp')">✕</button>
+    </div>
+    <input type="hidden" id="esp-edit-id">
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">ID / Nome</label>
+      <input class="form-control" id="esp-id" placeholder="ESP_HORTA_01">
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">Tópico MQTT</label>
+      <input class="form-control" id="esp-topic" placeholder="horta/esp01">
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">Localização / Descrição</label>
+      <input class="form-control" id="esp-desc" placeholder="Canteiro Norte">
+    </div></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-esp')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveEsp()">Salvar</button>
+    </div>
+  </div>
 </div>
-</header>
 
-<main>
-
-<div class="grid">
-<div class="card"><div>Nível</div><div id="nivel" class="stat">0%</div></div>
-<div class="card"><div>Consumo Diário</div><div id="consDia" class="stat">0L</div></div>
-<div class="card"><div>Consumo Semanal</div><div id="consSem" class="stat">0L</div></div>
-<div class="card"><div>RSSI</div><div id="rssi" class="stat">--</div></div>
-<div class="card"><div>Uptime</div><div id="uptime" class="stat">--</div></div>
-<div class="card"><div>ESP</div><div id="esp" class="stat">OFF</div></div>
+<!-- Modal: Agenda -->
+<div class="modal-overlay" id="modal-agenda">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="agenda-modal-title">Novo Agendamento</span>
+      <button class="modal-close" onclick="closeModal('modal-agenda')">✕</button>
+    </div>
+    <input type="hidden" id="agenda-edit-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Horário</label>
+        <input class="form-control" type="time" id="ag-hora">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Duração (min)</label>
+        <input class="form-control" type="number" id="ag-dur" value="5" min="1" max="120">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">ESP Alvo</label>
+      <select class="form-control" id="ag-esp"></select>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">Dias da Semana</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="ag-days">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="0" checked> Dom</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="1" checked> Seg</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="2" checked> Ter</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="3" checked> Qua</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="4" checked> Qui</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="5" checked> Sex</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" value="6" checked> Sáb</label>
+      </div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label class="form-label">Ativo</label>
+      <label class="switch" style="margin-top:4px"><input type="checkbox" id="ag-ativo" checked><span class="slider"></span></label>
+    </div></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-agenda')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveAgenda()">Salvar</button>
+    </div>
+  </div>
 </div>
 
-<br>
-
-<div class="grid">
-<div class="card">
-<h3>Gráfico Nível</h3>
-<canvas id="nivelChart"></canvas>
-</div>
-
-<div class="card">
-<h3>Controle</h3>
-<select id="duracao">
-<option>1</option><option>5</option><option>10</option>
-</select>
-<button onclick="enviar('ligar')">Ligar</button>
-<button onclick="enviar('desligar')">Desligar</button>
-<hr>
-<h4>Agendamentos</h4>
-<input type="time" id="hora">
-<input type="number" id="minutos" value="5">
-<button onclick="addAgenda()">Adicionar</button>
-<ul id="agenda"></ul>
-</div>
-</div>
-
-<br>
-
-<div class="grid">
-<div class="card">
-<h3>ESPs Cadastrados</h3>
-<table>
-<thead><tr><th>ID</th><th>Status</th></tr></thead>
-<tbody id="espTable"></tbody>
-</table>
-</div>
-
-<div class="card">
-<h3>Logs</h3>
-<div id="log"></div>
-</div>
-</div>
-
-<br>
-
-<div class="card">
-<button onclick="exportExcel()">Exportar Excel</button>
-<button onclick="exportPDF()">Exportar PDF</button>
-</div>
-
-</main>
+<!-- Toast container -->
+<div id="toastContainer"></div>
 
 <script>
-const MQTT_HOST="SEU_HOST";
-const MQTT_PORT=8883;
-const MQTT_USER="ESP32_Projeto";
-const MQTT_PASSWORD="12345Est";
+// ===================== STATE =====================
+let state = {
+  esps: JSON.parse(localStorage.getItem('h_esps') || 'null') || {
+    'ESP_HORTA_01': { topic:'horta/esp01', desc:'Canteiro Principal', status:'OFF', rssi:0, ip:'', wifi:'', uptime:'', lastMsg:null, nivel:0 }
+  },
+  historico: JSON.parse(localStorage.getItem('h_hist') || '[]'),
+  agenda: JSON.parse(localStorage.getItem('h_agenda') || '[]'),
+  logs: JSON.parse(localStorage.getItem('h_logs') || '[]'),
+  mqtt: JSON.parse(localStorage.getItem('h_mqtt') || 'null') || { host:'', port:8883, proto:'wss', user:'', pass:'', baseTopic:'horta' },
+  theme: localStorage.getItem('h_theme') || 'dark',
+  agendaTimer: null,
+};
 
-let historico=JSON.parse(localStorage.getItem("historico")||"[]");
-let agenda=JSON.parse(localStorage.getItem("agenda")||"[]");
-let esps=JSON.parse(localStorage.getItem("esps")||'{"ESP_HORTA_01":{"status":"OFF"}}');
+let mqttClient = null;
+let miniChartInst = null, nivelChartInst = null, rssiChartInst = null, consChartInst = null, espStatusChartInst = null;
 
+// ===================== PERSIST =====================
 function save(){
-localStorage.setItem("historico",JSON.stringify(historico));
-localStorage.setItem("agenda",JSON.stringify(agenda));
-localStorage.setItem("esps",JSON.stringify(esps));
+  localStorage.setItem('h_esps', JSON.stringify(state.esps));
+  localStorage.setItem('h_hist', JSON.stringify(state.historico));
+  localStorage.setItem('h_agenda', JSON.stringify(state.agenda));
+  localStorage.setItem('h_logs', JSON.stringify(state.logs.slice(-500)));
+  localStorage.setItem('h_mqtt', JSON.stringify(state.mqtt));
 }
 
-function log(t){
-document.getElementById("log").innerHTML += t+"<br>";
+// ===================== THEME =====================
+function applyTheme(){
+  const dark = document.getElementById('cfg-dark');
+  const isDark = dark ? dark.checked : (state.theme === 'dark');
+  document.body.classList.toggle('light-theme', !isDark);
+  state.theme = isDark ? 'dark' : 'light';
+  localStorage.setItem('h_theme', state.theme);
 }
-
 function toggleTheme(){
-document.body.classList.toggle("dark");
-localStorage.setItem("theme",document.body.classList.contains("dark"));
+  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  document.body.classList.toggle('light-theme', state.theme === 'light');
+  localStorage.setItem('h_theme', state.theme);
+  const dark = document.getElementById('cfg-dark');
+  if(dark) dark.checked = (state.theme === 'dark');
 }
 
-if(localStorage.getItem("theme")==="true")document.body.classList.add("dark");
-
-const chart=new Chart(document.getElementById("nivelChart"),{
-type:"line",
-data:{labels:[],datasets:[{label:"Nível",data:[]}]}
-});
-
-function atualizarGrafico(v){
-chart.data.labels.push(new Date().toLocaleTimeString());
-chart.data.datasets[0].data.push(v);
-if(chart.data.labels.length>30){
-chart.data.labels.shift();
-chart.data.datasets[0].data.shift();
-}
-chart.update();
-}
-
-function addAgenda(){
-agenda.push({
-hora:document.getElementById("hora").value,
-minutos:document.getElementById("minutos").value
-});
-save();
-renderAgenda();
+// ===================== NAVIGATION =====================
+function navTo(page, el){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.sb-item').forEach(i=>i.classList.remove('active'));
+  document.getElementById('pg-'+page).classList.add('active');
+  if(el) el.classList.add('active');
+  document.getElementById('pageTitle').textContent = el ? el.querySelector('.sb-label').textContent : page;
+  if(page==='graficos') setTimeout(()=>renderCharts(),100);
+  if(page==='historico') renderHistorico();
+  if(page==='relatorios') updateStats();
+  if(page==='esps') renderEsps();
+  if(page==='agenda') renderAgenda();
+  if(page==='controle') renderControle();
+  if(page==='config') loadConfig();
+  if(page==='logs') renderLogs();
 }
 
-function renderAgenda(){
-document.getElementById("agenda").innerHTML=agenda.map(a=>`<li>${a.hora} - ${a.minutos} min</li>`).join("");
+function toggleSidebar(){
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('collapsed');
+  const btn = sb.querySelector('.sb-toggle');
+  btn.textContent = sb.classList.contains('collapsed') ? '▶ Expandir' : '◀ Recolher';
 }
 
+// ===================== LOGGING =====================
+function log(msg, type='INFO'){
+  const ts = new Date().toLocaleTimeString('pt-BR');
+  const entry = { ts, msg, type };
+  state.logs.push(entry);
+  if(state.logs.length > 500) state.logs.shift();
+  save();
+  appendLog(entry);
+}
+function appendLog(e){
+  const el = document.getElementById('logContainer');
+  if(!el) return;
+  const cls = { INFO:'log-info', WARN:'log-warn', ERROR:'log-err', MQTT:'log-mqtt' }[e.type] || 'log-info';
+  el.innerHTML += `<div class="${cls}">[${e.ts}] [${e.type}] ${e.msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function renderLogs(){
+  const filter = document.getElementById('log-filter')?.value || '';
+  const el = document.getElementById('logContainer');
+  if(!el) return;
+  el.innerHTML = '';
+  const filtered = filter ? state.logs.filter(l=>l.type===filter) : state.logs;
+  filtered.forEach(e=>appendLog(e));
+}
+function clearLogs(){ state.logs=[]; save(); renderLogs(); toast('Logs limpos','info'); }
+
+// ===================== TOAST =====================
+function toast(msg, type='success'){
+  const c = document.getElementById('toastContainer');
+  const icons = { success:'✅', error:'❌', info:'ℹ️', warn:'⚠️' };
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span>${icons[type]||'ℹ️'}</span><span>${msg}</span>`;
+  c.appendChild(t);
+  setTimeout(()=>t.remove(), 3000);
+}
+
+// ===================== MQTT =====================
+function loadConfig(){
+  const m = state.mqtt;
+  document.getElementById('cfg-host').value = m.host || '';
+  document.getElementById('cfg-port').value = m.port || 8883;
+  document.getElementById('cfg-proto').value = m.proto || 'wss';
+  document.getElementById('cfg-user').value = m.user || '';
+  document.getElementById('cfg-pass').value = m.pass || '';
+  document.getElementById('cfg-topic').value = m.baseTopic || 'horta';
+  document.getElementById('cfg-dark').checked = state.theme === 'dark';
+}
+function saveMQTTConfig(){
+  state.mqtt = {
+    host: document.getElementById('cfg-host').value,
+    port: parseInt(document.getElementById('cfg-port').value) || 8883,
+    proto: document.getElementById('cfg-proto').value,
+    user: document.getElementById('cfg-user').value,
+    pass: document.getElementById('cfg-pass').value,
+    baseTopic: document.getElementById('cfg-topic').value || 'horta'
+  };
+  save(); toast('Configurações MQTT salvas');
+}
+function connectMQTT(){
+  if(!state.mqtt.host){ toast('Configure o broker MQTT primeiro','warn'); navTo('config', document.querySelector('[data-page=config]')); return; }
+  if(mqttClient){ mqttClient.end(); mqttClient=null; }
+  const { host, port, proto, user, pass } = state.mqtt;
+  log(`Conectando a ${proto}://${host}:${port}`, 'MQTT');
+  try{
+    mqttClient = mqtt.connect(`${proto}://${host}:${port}/mqtt`, {
+      username: user, password: pass, clean: false,
+      clientId: 'HortaONG_' + Math.random().toString(16).substr(2,6)
+    });
+    mqttClient.on('connect', ()=>{
+      setMQTTStatus(true);
+      log('MQTT conectado!', 'MQTT');
+      toast('MQTT Conectado');
+      subscribeAll();
+    });
+    mqttClient.on('error', e=>{ log('Erro MQTT: '+e.message,'ERROR'); setMQTTStatus(false); });
+    mqttClient.on('offline', ()=>{ setMQTTStatus(false); log('MQTT offline','WARN'); });
+    mqttClient.on('message', onMQTTMessage);
+  } catch(e){ log('Falha ao conectar: '+e.message,'ERROR'); }
+}
+function subscribeAll(){
+  if(!mqttClient) return;
+  const base = state.mqtt.baseTopic || 'horta';
+  mqttClient.subscribe(`${base}/#`, e=>{ if(!e) log(`Inscrito em ${base}/#`,'MQTT'); });
+}
+function setMQTTStatus(ok){
+  document.getElementById('mqttDot').className = 'status-dot' + (ok?' connected':'');
+  document.getElementById('mqttStatus').textContent = ok ? 'Conectado' : 'Desconectado';
+}
+function onMQTTMessage(topic, payload){
+  const raw = payload.toString();
+  log(`[${topic}] ${raw}`, 'MQTT');
+  try{
+    const d = JSON.parse(raw);
+    const espId = d.id || topic.split('/')[1] || 'desconhecido';
+    if(!state.esps[espId]) state.esps[espId] = { topic, desc:'Auto-detectado', status:'OFF', nivel:0 };
+    const esp = state.esps[espId];
+    esp.status = 'ON';
+    esp.lastMsg = new Date().toISOString();
+    if(d.porcentagem !== undefined) esp.nivel = d.porcentagem;
+    if(d.rssi !== undefined) esp.rssi = d.rssi;
+    if(d.ip !== undefined) esp.ip = d.ip;
+    if(d.wifi !== undefined) esp.wifi = d.wifi;
+    if(d.uptime !== undefined) esp.uptime = d.uptime;
+    const rec = { ts: new Date().toISOString(), esp: espId, nivel: d.porcentagem||0, rssi: d.rssi||0, ip: d.ip||'', wifi: d.wifi||'', uptime: d.uptime||'', evento: d.evento||'leitura' };
+    state.historico.push(rec);
+    if(state.historico.length > 2000) state.historico.shift();
+    save();
+    updateDashboard(espId, d);
+    if(document.getElementById('pg-historico').classList.contains('active')) renderHistorico();
+  } catch(e){ log('Payload inválido: '+e.message,'WARN'); }
+}
+function sendCmd(acao){
+  const espId = document.getElementById('ctrl-esp').value;
+  const dur = document.getElementById('ctrl-dur').value;
+  const esp = state.esps[espId];
+  if(!esp){ toast('Selecione um ESP','warn'); return; }
+  const topic = esp.topic + '/cmd';
+  const payload = JSON.stringify({ acao, duracao: parseInt(dur) });
+  if(mqttClient && mqttClient.connected){
+    mqttClient.publish(topic, payload);
+    log(`Enviado [${topic}]: ${payload}`, 'MQTT');
+    toast(`Comando "${acao}" enviado`);
+  } else {
+    log(`[SIMULADO] [${topic}]: ${payload}`, 'WARN');
+    toast('MQTT desconectado – simulando','warn');
+  }
+}
+function sendCustom(){
+  const topic = document.getElementById('custom-topic').value;
+  const payload = document.getElementById('custom-payload').value;
+  if(!topic){ toast('Informe o tópico','warn'); return; }
+  if(mqttClient && mqttClient.connected){
+    mqttClient.publish(topic, payload);
+    log(`Personalizado [${topic}]: ${payload}`, 'MQTT');
+    toast('Mensagem enviada');
+  } else {
+    log(`[SIMULADO] [${topic}]: ${payload}`, 'WARN');
+    toast('MQTT desconectado – simulando','warn');
+  }
+}
+
+// ===================== DASHBOARD =====================
+function updateDashboard(espId, d){
+  const nivel = d.porcentagem || 0;
+  document.getElementById('s-nivel').textContent = nivel + '%';
+  document.getElementById('s-nivel-sub').textContent = nivel > 50 ? 'Nível adequado' : nivel > 20 ? 'Atenção' : '⚠️ Nível crítico';
+  const offset = 283 - (283 * nivel / 100);
+  document.getElementById('ring-fill').style.strokeDashoffset = offset;
+  document.getElementById('ring-pct').textContent = nivel + '%';
+  document.getElementById('g-nivel').style.width = nivel + '%';
+  if(d.rssi !== undefined){ document.getElementById('s-rssi').textContent = d.rssi+' dBm'; updateSignal(d.rssi); }
+  if(d.wifi !== undefined) document.getElementById('s-wifi').textContent = d.wifi;
+  if(d.ip !== undefined) document.getElementById('s-ip').textContent = d.ip;
+  if(d.uptime !== undefined) document.getElementById('s-uptime').textContent = d.uptime;
+  document.getElementById('s-esp').textContent = espId;
+  calcStats();
+  renderDashEsps();
+  updateMiniChart(nivel);
+  if(document.getElementById('cfg-alerts').checked && nivel < 20){
+    toast(`⚠️ Nível baixo em ${espId}: ${nivel}%`, 'warn');
+  }
+}
+function updateSignal(rssi){
+  const bars = document.querySelectorAll('#signal-bars .signal-bar');
+  const strength = rssi >= -50 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
+  bars.forEach((b,i) => b.classList.toggle('active', i < strength));
+}
+function calcStats(){
+  const now = new Date();
+  const today = now.toDateString();
+  const weekAgo = new Date(now - 7*86400000);
+  const monthAgo = new Date(now - 30*86400000);
+  const dia = state.historico.filter(r=>new Date(r.ts).toDateString()===today).length;
+  const sem = state.historico.filter(r=>new Date(r.ts)>=weekAgo).length;
+  const mes = state.historico.filter(r=>new Date(r.ts)>=monthAgo).length;
+  document.getElementById('s-dia').textContent = dia+'L';
+  document.getElementById('s-sem').textContent = sem+'L';
+  document.getElementById('s-mes').textContent = mes+'L';
+  const e2 = ['stat-dia2','stat-sem2','stat-mes2','stat-total'];
+  if(document.getElementById(e2[0])){
+    document.getElementById(e2[0]).textContent = dia+'L';
+    document.getElementById(e2[1]).textContent = sem+'L';
+    document.getElementById(e2[2]).textContent = mes+'L';
+    document.getElementById(e2[3]).textContent = state.historico.length;
+  }
+}
+function renderDashEsps(){
+  const tbody = document.getElementById('dash-esp-tbody');
+  if(!tbody) return;
+  tbody.innerHTML = Object.entries(state.esps).map(([id,e])=>`
+    <tr>
+      <td><strong>${id}</strong><br><small style="color:var(--text3)">${e.desc||''}</small></td>
+      <td><span class="badge badge-${e.status==='ON'?'green':'red'}">${e.status}</span></td>
+      <td><span class="badge badge-blue">${e.rssi||'—'}</span></td>
+      <td><span style="font-family:var(--mono);font-size:12px">${e.ip||'—'}</span></td>
+      <td>${e.wifi||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:12px">${e.uptime||'—'}</span></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="sendCmdTo('${id}','status')">📊</button></td>
+    </tr>
+  `).join('');
+}
+function sendCmdTo(espId, acao){
+  const esp = state.esps[espId];
+  if(!esp) return;
+  const topic = esp.topic + '/cmd';
+  if(mqttClient && mqttClient.connected) mqttClient.publish(topic, JSON.stringify({ acao }));
+  log(`Cmd ${acao} → ${espId}`, 'MQTT');
+  toast(`${acao} enviado para ${espId}`);
+}
+
+// ===================== MINI CHART =====================
+function initMiniChart(){
+  const ctx = document.getElementById('miniChart');
+  if(!ctx || miniChartInst) return;
+  miniChartInst = new Chart(ctx, {
+    type:'line',
+    data:{ labels:[], datasets:[{ label:'Nível %', data:[], borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.1)', fill:true, tension:.4, pointRadius:2 }] },
+    options:{ animation:false, plugins:{ legend:{ display:false } }, scales:{ y:{ min:0,max:100 }, x:{ ticks:{ maxTicksLimit:6, color:'#8b949e' }, grid:{ color:'rgba(255,255,255,.05)' } }, y2:{ display:false } } }
+  });
+}
+function updateMiniChart(v){
+  if(!miniChartInst) initMiniChart();
+  const c = miniChartInst;
+  c.data.labels.push(new Date().toLocaleTimeString('pt-BR'));
+  c.data.datasets[0].data.push(v);
+  if(c.data.labels.length>40){ c.data.labels.shift(); c.data.datasets[0].data.shift(); }
+  c.update('none');
+}
+
+// ===================== CHARTS PAGE =====================
+function renderCharts(){
+  renderNivelChart();
+  renderRssiChart();
+  renderConsChart();
+  renderEspStatusChart();
+}
+function mkChart(id,type,labels,datasets,opts={}){
+  const ctx = document.getElementById(id);
+  if(!ctx) return null;
+  const ex = Chart.getChart(id);
+  if(ex) ex.destroy();
+  return new Chart(ctx,{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e'}}},scales:{x:{ticks:{color:'#8b949e'},grid:{color:'rgba(255,255,255,.05)'}},y:{ticks:{color:'#8b949e'},grid:{color:'rgba(255,255,255,.05)'}}}, ...opts}});
+}
+function renderNivelChart(){
+  const data = state.historico.slice(-60);
+  mkChart('nivelChart','line', data.map(r=>new Date(r.ts).toLocaleTimeString('pt-BR')), [{label:'Nível %',data:data.map(r=>r.nivel),borderColor:'#3fb950',backgroundColor:'rgba(63,185,80,.1)',fill:true,tension:.4}]);
+}
+function renderRssiChart(){
+  const data = state.historico.slice(-60);
+  mkChart('rssiChart','line', data.map(r=>new Date(r.ts).toLocaleTimeString('pt-BR')), [{label:'RSSI (dBm)',data:data.map(r=>r.rssi),borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,.1)',fill:true,tension:.4}]);
+}
+function renderConsChart(){
+  const days=[];
+  const counts=[];
+  for(let i=6;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toDateString();
+    days.push(d.toLocaleDateString('pt-BR',{weekday:'short'}));
+    counts.push(state.historico.filter(r=>new Date(r.ts).toDateString()===ds).length);
+  }
+  mkChart('consChart','bar', days, [{label:'Leituras',data:counts,backgroundColor:'rgba(63,185,80,.6)',borderColor:'#3fb950',borderWidth:1}]);
+}
+function renderEspStatusChart(){
+  const on = Object.values(state.esps).filter(e=>e.status==='ON').length;
+  const off = Object.values(state.esps).filter(e=>e.status!=='ON').length;
+  const ctx=document.getElementById('espStatusChart');
+  if(!ctx) return;
+  const ex=Chart.getChart('espStatusChart'); if(ex) ex.destroy();
+  new Chart(ctx,{type:'doughnut',data:{labels:['Online','Offline'],datasets:[{data:[on,off],backgroundColor:['#3fb950','#f85149']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e'}}}}});
+}
+
+// ===================== ESPs CRUD =====================
 function renderEsps(){
-let html="";
-Object.keys(esps).forEach(k=>{
-html+=`<tr><td>${k}</td><td>${esps[k].status}</td></tr>`;
-});
-document.getElementById("espTable").innerHTML=html;
+  const tbody = document.getElementById('esps-tbody');
+  if(!tbody) return;
+  tbody.innerHTML = Object.entries(state.esps).map(([id,e])=>`
+    <tr>
+      <td><strong>${id}</strong><br><small style="color:var(--text3)">${e.desc||''}</small></td>
+      <td><span style="font-family:var(--mono);font-size:12px">${e.topic||'—'}</span></td>
+      <td><span class="badge badge-${e.status==='ON'?'green':'red'}">${e.status}</span></td>
+      <td>${e.rssi||'—'} dBm</td>
+      <td><span style="font-family:var(--mono);font-size:12px">${e.ip||'—'}</span></td>
+      <td>${e.wifi||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:12px">${e.uptime||'—'}</span></td>
+      <td>${e.lastMsg ? new Date(e.lastMsg).toLocaleString('pt-BR') : '—'}</td>
+      <td style="display:flex;gap:4px">
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="editEsp('${id}')" title="Editar">✏️</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteEsp('${id}')" title="Excluir">🗑️</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">Nenhum ESP cadastrado</td></tr>';
+  updateEspSelects();
+}
+function openEspModal(id){
+  document.getElementById('esp-edit-id').value = id || '';
+  document.getElementById('esp-modal-title').textContent = id ? 'Editar ESP' : 'Adicionar ESP';
+  if(id){
+    const e=state.esps[id];
+    document.getElementById('esp-id').value=id;
+    document.getElementById('esp-id').disabled=true;
+    document.getElementById('esp-topic').value=e.topic||'';
+    document.getElementById('esp-desc').value=e.desc||'';
+  } else {
+    document.getElementById('esp-id').value='';
+    document.getElementById('esp-id').disabled=false;
+    document.getElementById('esp-topic').value='';
+    document.getElementById('esp-desc').value='';
+  }
+  openModal('modal-esp');
+}
+function editEsp(id){ openEspModal(id); }
+function saveEsp(){
+  const editId = document.getElementById('esp-edit-id').value;
+  const id = editId || document.getElementById('esp-id').value.trim();
+  const topic = document.getElementById('esp-topic').value.trim();
+  const desc = document.getElementById('esp-desc').value.trim();
+  if(!id){ toast('Informe o ID','warn'); return; }
+  if(editId && editId !== id){ delete state.esps[editId]; }
+  state.esps[id] = Object.assign(state.esps[id]||{status:'OFF',rssi:0,nivel:0}, { topic, desc });
+  save(); closeModal('modal-esp'); renderEsps(); renderDashEsps();
+  log(`ESP ${editId?'atualizado':'criado'}: ${id}`, 'INFO');
+  toast(`ESP ${editId?'atualizado':'adicionado'}`);
+  if(mqttClient && mqttClient.connected) subscribeAll();
+}
+function deleteEsp(id){
+  if(!confirm(`Excluir ${id}?`)) return;
+  delete state.esps[id]; save(); renderEsps(); renderDashEsps();
+  log(`ESP excluído: ${id}`, 'WARN'); toast(`${id} excluído`,'warn');
+}
+function updateEspSelects(){
+  const ids = Object.keys(state.esps);
+  ['ctrl-esp','ag-esp'].forEach(elId=>{
+    const sel = document.getElementById(elId);
+    if(!sel) return;
+    const curr = sel.value;
+    sel.innerHTML = ids.map(i=>`<option value="${i}">${i}</option>`).join('');
+    if(curr && ids.includes(curr)) sel.value=curr;
+  });
 }
 
+// ===================== CONTROLE =====================
+function renderControle(){
+  updateEspSelects();
+  const grid = document.getElementById('pump-status-grid');
+  if(!grid) return;
+  grid.innerHTML = Object.entries(state.esps).map(([id,e])=>`
+    <div class="card" style="text-align:center">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${id}</div>
+      <div style="font-size:30px">${e.status==='ON'?'💧':'⏸️'}</div>
+      <div class="badge badge-${e.status==='ON'?'green':'red'}" style="margin:6px auto">${e.status}</div>
+      <div style="display:flex;gap:4px;justify-content:center;margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="sendCmdTo('${id}','ligar')">Ligar</button>
+        <button class="btn btn-danger btn-sm" onclick="sendCmdTo('${id}','desligar')">Desligar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===================== AGENDA =====================
+function openAgendaModal(id){
+  document.getElementById('agenda-edit-id').value = id !== undefined ? id : '';
+  document.getElementById('agenda-modal-title').textContent = id !== undefined ? 'Editar Agendamento' : 'Novo Agendamento';
+  updateEspSelects();
+  if(id !== undefined){
+    const a = state.agenda[id];
+    document.getElementById('ag-hora').value=a.hora||'';
+    document.getElementById('ag-dur').value=a.dur||5;
+    document.getElementById('ag-esp').value=a.esp||'';
+    document.getElementById('ag-ativo').checked=a.ativo!==false;
+    document.querySelectorAll('#ag-days input').forEach(cb=>{ cb.checked = (a.days||[]).includes(parseInt(cb.value)); });
+  } else {
+    document.getElementById('ag-hora').value='';
+    document.getElementById('ag-dur').value=5;
+    document.getElementById('ag-ativo').checked=true;
+    document.querySelectorAll('#ag-days input').forEach(cb=>cb.checked=true);
+  }
+  openModal('modal-agenda');
+}
+function saveAgenda(){
+  const editId = document.getElementById('agenda-edit-id').value;
+  const days = [...document.querySelectorAll('#ag-days input:checked')].map(c=>parseInt(c.value));
+  const item = {
+    hora: document.getElementById('ag-hora').value,
+    dur: parseInt(document.getElementById('ag-dur').value)||5,
+    esp: document.getElementById('ag-esp').value,
+    days,
+    ativo: document.getElementById('ag-ativo').checked,
+    criado: new Date().toISOString()
+  };
+  if(!item.hora){ toast('Informe o horário','warn'); return; }
+  if(editId !== ''){
+    state.agenda[parseInt(editId)] = item;
+  } else {
+    state.agenda.push(item);
+  }
+  save(); closeModal('modal-agenda'); renderAgenda();
+  log(`Agendamento ${editId!==''?'editado':'criado'}: ${item.hora} – ${item.esp}`, 'INFO');
+  toast('Agendamento salvo');
+}
+function deleteAgenda(i){
+  if(!confirm('Excluir agendamento?')) return;
+  state.agenda.splice(i,1); save(); renderAgenda(); toast('Agendamento removido','warn');
+}
+function toggleAgenda(i){
+  state.agenda[i].ativo = !state.agenda[i].ativo;
+  save(); renderAgenda();
+}
+const DAYS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function renderAgenda(){
+  const list = document.getElementById('agenda-list');
+  const prox = document.getElementById('proximas-list');
+  if(!list) return;
+  list.innerHTML = state.agenda.length ? state.agenda.map((a,i)=>`
+    <div class="agenda-item">
+      <div>
+        <div class="agenda-time">${a.hora}</div>
+        <div style="font-size:12px;color:var(--text2)">${a.esp||'Todos'} · ${a.dur} min · ${(a.days||[]).map(d=>DAYS[d]).join(', ')}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span class="badge badge-${a.ativo?'green':'red'}">${a.ativo?'Ativo':'Pausado'}</span>
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="toggleAgenda(${i})" title="Toggle">⏯️</button>
+        <button class="btn btn-secondary btn-sm btn-icon" onclick="openAgendaModal(${i})" title="Editar">✏️</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteAgenda(${i})" title="Excluir">🗑️</button>
+      </div>
+    </div>
+  `).join('') : '<div style="color:var(--text3);font-size:13px">Nenhum agendamento cadastrado.</div>';
+  if(prox){
+    const now = new Date();
+    const nowMin = now.getHours()*60+now.getMinutes();
+    const today = now.getDay();
+    const sorted = state.agenda.filter(a=>a.ativo).map(a=>{
+      const [h,m]=a.hora.split(':').map(Number);
+      const diff=(h*60+m)-nowMin;
+      return {...a, diff: diff<0?diff+1440:diff};
+    }).sort((a,b)=>a.diff-b.diff).slice(0,5);
+    prox.innerHTML = sorted.length ? sorted.map(a=>`
+      <div class="agenda-item">
+        <div>
+          <div class="agenda-time">${a.hora}</div>
+          <div style="font-size:12px;color:var(--text2)">${a.esp} · ${a.dur} min</div>
+        </div>
+        <span class="badge badge-yellow">em ${a.diff}min</span>
+      </div>
+    `).join('') : '<div style="color:var(--text3);font-size:13px">Nenhum agendamento ativo.</div>';
+  }
+}
+// Scheduler loop
+function checkAgenda(){
+  const now = new Date();
+  const h = now.getHours().toString().padStart(2,'0');
+  const m = now.getMinutes().toString().padStart(2,'0');
+  const time = `${h}:${m}`;
+  const day = now.getDay();
+  state.agenda.filter(a=>a.ativo && a.hora===time && (a.days||[]).includes(day)).forEach(a=>{
+    log(`⏰ Agendamento disparado: ${a.esp} por ${a.dur}min`, 'INFO');
+    toast(`⏰ Irrigação agendada: ${a.esp}`,'info');
+    sendCmdTo(a.esp,'ligar');
+  });
+}
+
+// ===================== HISTORICO =====================
+function renderHistorico(){
+  const tbody = document.getElementById('hist-tbody');
+  const count = document.getElementById('hist-count');
+  if(!tbody) return;
+  let data = [...state.historico].reverse();
+  const fe = document.getElementById('hist-filter-esp')?.value.toLowerCase();
+  const fd = document.getElementById('hist-filter-date')?.value;
+  if(fe) data = data.filter(r=>r.esp.toLowerCase().includes(fe));
+  if(fd) data = data.filter(r=>r.ts.startsWith(fd));
+  tbody.innerHTML = data.slice(0,200).map((r,i)=>`
+    <tr>
+      <td style="color:var(--text3)">${data.length-i}</td>
+      <td><span style="font-family:var(--mono);font-size:12px">${new Date(r.ts).toLocaleString('pt-BR')}</span></td>
+      <td><span class="badge badge-green">${r.esp||'—'}</span></td>
+      <td><strong>${r.nivel||0}%</strong></td>
+      <td>${r.rssi||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.ip||'—'}</span></td>
+      <td>${r.wifi||'—'}</td>
+      <td><span style="font-family:var(--mono);font-size:11px">${r.uptime||'—'}</span></td>
+      <td><span class="badge badge-blue">${r.evento||'leitura'}</span></td>
+    </tr>
+  `).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">Nenhum registro</td></tr>';
+  if(count) count.textContent = `Exibindo ${Math.min(data.length,200)} de ${data.length} registros`;
+}
+function clearHistFilter(){
+  document.getElementById('hist-filter-esp').value='';
+  document.getElementById('hist-filter-date').value='';
+  renderHistorico();
+}
+function clearHistorico(){ if(!confirm('Limpar todo o histórico?')) return; state.historico=[]; save(); renderHistorico(); calcStats(); toast('Histórico limpo','warn'); }
+function updateStats(){ calcStats(); const t=document.getElementById('stat-total'); if(t) t.textContent=state.historico.length; }
+
+// ===================== EXPORT =====================
 function exportExcel(){
-const ws=XLSX.utils.json_to_sheet(historico);
-const wb=XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb,ws,"Historico");
-XLSX.writeFile(wb,"horta.xlsx");
+  const ws = XLSX.utils.json_to_sheet(state.historico.map(r=>({
+    'Data/Hora': new Date(r.ts).toLocaleString('pt-BR'),
+    'ESP': r.esp, 'Nível %': r.nivel, 'RSSI': r.rssi,
+    'IP': r.ip, 'Wi-Fi': r.wifi, 'Uptime': r.uptime, 'Evento': r.evento
+  })));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Historico');
+  XLSX.writeFile(wb, 'horta_historico.xlsx');
+  toast('Excel exportado'); log('Excel exportado','INFO');
 }
-
+function exportExcelFull(){
+  const scope = document.getElementById('excel-scope').value;
+  const wb = XLSX.utils.book_new();
+  if(scope==='all'||scope==='hist'){
+    const ws = XLSX.utils.json_to_sheet(state.historico.map(r=>({
+      'Data/Hora': new Date(r.ts).toLocaleString('pt-BR'), 'ESP': r.esp,
+      'Nível %': r.nivel, 'RSSI': r.rssi, 'IP': r.ip, 'Wi-Fi': r.wifi, 'Uptime': r.uptime
+    })));
+    XLSX.utils.book_append_sheet(wb, ws, 'Historico');
+  }
+  if(scope==='all'||scope==='esps'){
+    const ws2 = XLSX.utils.json_to_sheet(Object.entries(state.esps).map(([id,e])=>({
+      'ID': id, 'Tópico': e.topic, 'Descrição': e.desc, 'Status': e.status,
+      'RSSI': e.rssi, 'IP': e.ip, 'Wi-Fi': e.wifi, 'Uptime': e.uptime
+    })));
+    XLSX.utils.book_append_sheet(wb, ws2, 'ESPs');
+  }
+  if(scope==='all'){
+    const ws3 = XLSX.utils.json_to_sheet(state.agenda.map(a=>({
+      'Horário': a.hora, 'ESP': a.esp, 'Duração (min)': a.dur,
+      'Dias': (a.days||[]).map(d=>DAYS[d]).join(', '), 'Ativo': a.ativo
+    })));
+    XLSX.utils.book_append_sheet(wb, ws3, 'Agenda');
+  }
+  XLSX.writeFile(wb, 'horta_relatorio.xlsx');
+  toast('Excel completo exportado'); log('Excel completo exportado','INFO');
+}
 async function exportPDF(){
-const {jsPDF}=window.jspdf;
-const pdf=new jsPDF();
-pdf.text("Relatorio Horta ONG",10,10);
-pdf.text("Registros: "+historico.length,10,20);
-pdf.save("horta.pdf");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  const period = document.getElementById('pdf-period')?.value || 'week';
+  const now = new Date();
+  let data = state.historico;
+  if(period==='today') data = data.filter(r=>new Date(r.ts).toDateString()===now.toDateString());
+  else if(period==='week') data = data.filter(r=>new Date(r.ts)>= new Date(now-7*86400000));
+  else if(period==='month') data = data.filter(r=>new Date(r.ts)>= new Date(now-30*86400000));
+
+  pdf.setFillColor(22,27,34); pdf.rect(0,0,210,297,'F');
+  pdf.setTextColor(63,185,80);
+  pdf.setFontSize(20); pdf.text('🌱 Horta ONG – Relatório', 14, 20);
+  pdf.setTextColor(200,200,200);
+  pdf.setFontSize(11);
+  pdf.text(`Gerado em: ${now.toLocaleString('pt-BR')}`, 14, 30);
+  pdf.text(`Período: ${period}`, 14, 38);
+  pdf.text(`Registros: ${data.length}`, 14, 46);
+  pdf.text(`ESPs Cadastrados: ${Object.keys(state.esps).length}`, 14, 54);
+  pdf.text(`Agendamentos: ${state.agenda.length}`, 14, 62);
+
+  if(data.length){
+    pdf.autoTable({
+      startY: 72,
+      head:[['Data/Hora','ESP','Nível %','RSSI','IP','Wi-Fi']],
+      body: data.slice(0,50).map(r=>[
+        new Date(r.ts).toLocaleString('pt-BR'), r.esp, r.nivel+'%', r.rssi, r.ip, r.wifi
+      ]),
+      styles:{ fontSize:9, textColor:[200,200,200], fillColor:[28,35,51] },
+      headStyles:{ fillColor:[45,122,58], textColor:255, fontStyle:'bold' },
+      alternateRowStyles:{ fillColor:[22,27,34] }
+    });
+  }
+  pdf.save('horta_relatorio.pdf');
+  toast('PDF exportado'); log('PDF exportado','INFO');
 }
 
-function enviar(acao){
-log("Comando: "+acao);
+// ===================== MODALS =====================
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+// ===================== INIT =====================
+function init(){
+  // Theme
+  if(state.theme==='light') document.body.classList.add('light-theme');
+  const darkChk = document.getElementById('cfg-dark');
+  if(darkChk) darkChk.checked = state.theme==='dark';
+
+  // Init charts
+  initMiniChart();
+
+  // Render initial data
+  renderDashEsps();
+  updateEspSelects();
+  calcStats();
+  renderAgenda();
+  loadConfig();
+
+  // Simulate demo data if empty
+  if(state.historico.length === 0) seedDemo();
+
+  // Agenda scheduler - check every minute
+  clearInterval(state.agendaTimer);
+  state.agendaTimer = setInterval(checkAgenda, 30000);
+
+  log('Sistema inicializado', 'INFO');
 }
 
-renderAgenda();
-renderEsps();
+function seedDemo(){
+  const esps = Object.keys(state.esps);
+  const now = Date.now();
+  for(let i=59;i>=0;i--){
+    state.historico.push({
+      ts: new Date(now - i*5*60000).toISOString(),
+      esp: esps[0] || 'ESP_HORTA_01',
+      nivel: Math.round(60 + Math.random()*30),
+      rssi: Math.round(-60 - Math.random()*20),
+      ip: '192.168.1.100',
+      wifi: 'HortaNet',
+      uptime: `${i}min`,
+      evento: 'leitura'
+    });
+  }
+  // Fake current reading
+  updateDashboard(esps[0]||'ESP_HORTA_01', { porcentagem:75, rssi:-65, ip:'192.168.1.100', wifi:'HortaNet', uptime:'1h 30min' });
+  save(); log('Dados de demonstração carregados','INFO');
+}
 
-// MQTT (placeholder pronto para configuração)
-/*
-const client=mqtt.connect(`wss://${MQTT_HOST}:${MQTT_PORT}/mqtt`,{
-username:MQTT_USER,password:MQTT_PASSWORD,clean:false
-});
-
-client.on("message",(topic,payload)=>{
-const d=JSON.parse(payload.toString());
-
-document.getElementById("nivel").innerText=d.porcentagem+"%";
-document.getElementById("rssi").innerText=d.rssi+" dBm";
-document.getElementById("uptime").innerText=d.uptime;
-
-historico.push({...d,data:new Date().toISOString()});
-save();
-atualizarGrafico(d.porcentagem);
-});
-*/
+document.addEventListener('DOMContentLoaded', init);
 </script>
-
 </body>
 </html>
-"""
-path="/mnt/data/index_horta_dashboard_completo.html"
-Path(path).write_text(html,encoding="utf-8")
-print(path)
