@@ -815,8 +815,8 @@ input:checked+.slider:before{transform:translateX(20px)}
 // ===================== STATE =====================
 // ---- credenciais padrão do ESP32 (HiveMQ) ----
 const DEFAULT_MQTT = {
-  host: '77d9f94ffad94e568e3cdc3c92f4e1ec.s1.eu.hivemq.cloud',
-  port: 8884,   // HiveMQ WSS usa 8884
+  host: 'e152b588dea542c1a7b6225e76276492.s1.eu.hivemq.cloud',
+  port: 8884,   // HiveMQ WSS WebSocket Port
   proto: 'wss',
   user: 'computaria',
   pass: 'Computaria1',
@@ -1589,6 +1589,15 @@ function init(){
 
   log('Sistema inicializado – Horta ONG v2.1', 'INFO');
   log(`Broker configurado: ${state.mqtt.host}:${state.mqtt.port}`, 'INFO');
+
+  // Migra credenciais antigas para o novo cluster
+  const OLD_HOST = '77d9f94ffad94e568e3cdc3c92f4e1ec.s1.eu.hivemq.cloud';
+  if(state.mqtt.host === OLD_HOST || !state.mqtt.host){
+    state.mqtt = { ...DEFAULT_MQTT };
+    save();
+    loadConfig();
+    log('Credenciais migradas para o novo cluster HiveMQ', 'INFO');
+  }
 
   // Auto-connect se as credenciais já estiverem salvas
   if(state.mqtt.host){
