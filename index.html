@@ -449,11 +449,16 @@ input:checked+.slider:before{transform:translateX(20px)}
       <div class="grid-2">
         <div class="card">
           <div class="card-title"><span>🎛️</span> Controle de Irrigação</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">ESP Alvo</label>
-              <select class="form-control" id="ctrl-esp"></select>
+          <!-- Status em tempo real da bomba -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+            <span style="font-size:22px" id="bomba-icon">⏸️</span>
+            <div style="flex:1">
+              <div style="font-size:12px;color:var(--text3);font-weight:600">STATUS DA BOMBA</div>
+              <div style="font-size:13px;font-weight:600" id="bomba-status-label">Desligada</div>
             </div>
+            <span class="badge badge-red" id="bomba-badge">OFF</span>
+          </div>
+          <div class="form-row">
             <div class="form-group">
               <label class="form-label">Duração (min)</label>
               <select class="form-control" id="ctrl-dur">
@@ -469,24 +474,28 @@ input:checked+.slider:before{transform:translateX(20px)}
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary" onclick="sendCmd('ligar')">💧 Ligar</button>
             <button class="btn btn-danger" onclick="sendCmd('desligar')">🛑 Desligar</button>
-            <button class="btn btn-secondary" onclick="sendCmd('status')">📊 Solicitar Status</button>
+            <button class="btn btn-secondary" onclick="requestStatus()">📊 Solicitar Status</button>
           </div>
+          <div style="margin-top:10px;font-size:11px;color:var(--text3)">📡 Tópico: <code style="color:var(--blue)">horta/irrigacao/cmd</code></div>
         </div>
         <div class="card">
           <div class="card-title"><span>📡</span> Envio MQTT Personalizado</div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Tópico</label>
-              <input class="form-control" id="custom-topic" placeholder="horta/esp01/cmd">
+              <input class="form-control" id="custom-topic" placeholder="horta/irrigacao/cmd" value="horta/irrigacao/cmd">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Payload</label>
-              <input class="form-control" id="custom-payload" placeholder='{"acao":"ligar","duracao":5}'>
+              <input class="form-control" id="custom-payload" placeholder='{"acao":"ligar","duracao_min":5}' value='{"acao":"ligar","duracao_min":5}'>
             </div>
           </div>
           <button class="btn btn-primary" onclick="sendCustom()">📤 Enviar</button>
+          <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+            Tópicos disponíveis: <code style="color:var(--blue)">horta/nivel</code> · <code style="color:var(--blue)">horta/irrigacao/status</code> · <code style="color:var(--blue)">horta/irrigacao/cmd</code> · <code style="color:var(--blue)">horta/agendamento</code>
+          </div>
         </div>
       </div>
 
@@ -500,7 +509,10 @@ input:checked+.slider:before{transform:translateX(20px)}
     <div class="page" id="pg-agenda">
       <div class="sec-header">
         <div class="sec-title">Agendamentos</div>
-        <button class="btn btn-primary" onclick="openAgendaModal()">+ Novo Agendamento</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="sendAgendaToESP()" title="Envia agendamentos ao ESP via MQTT">📡 Sincronizar com ESP</button>
+          <button class="btn btn-primary" onclick="openAgendaModal()">+ Novo Agendamento</button>
+        </div>
       </div>
       <div class="grid-2">
         <div class="card">
@@ -801,21 +813,36 @@ input:checked+.slider:before{transform:translateX(20px)}
 
 <script>
 // ===================== STATE =====================
+// ---- credenciais padrão do ESP32 (HiveMQ) ----
+const DEFAULT_MQTT = {
+  host: '77d9f94ffad94e568e3cdc3c92f4e1ec.s1.eu.hivemq.cloud',
+  port: 8884,   // HiveMQ WSS usa 8884
+  proto: 'wss',
+  user: 'computaria',
+  pass: 'Computaria1',
+  baseTopic: 'horta'
+};
+// Tópicos do ESP (devem bater com o firmware)
+const TOPICS = {
+  nivel:   'horta/nivel',
+  status:  'horta/irrigacao/status',
+  cmd:     'horta/irrigacao/cmd',
+  agenda:  'horta/agendamento'
+};
+
 let state = {
   esps: JSON.parse(localStorage.getItem('h_esps') || 'null') || {
-    'ESP_HORTA_01': { topic:'horta', desc:'ESP32 Horta', status:'OFF', rssi:0, ip:'', wifi:'', uptime:'', lastMsg:null, nivel:0 }
+    'esp32_horta_001': {
+      topic: 'horta',
+      desc: 'Horta Principal – ESP32',
+      status: 'OFF', rssi: 0, ip: '', wifi: '', uptime: '', lastMsg: null, nivel: 0,
+      bombaLigada: false, bombaTimer: 0
+    }
   },
   historico: JSON.parse(localStorage.getItem('h_hist') || '[]'),
   agenda: JSON.parse(localStorage.getItem('h_agenda') || '[]'),
   logs: JSON.parse(localStorage.getItem('h_logs') || '[]'),
-  mqtt: JSON.parse(localStorage.getItem('h_mqtt') || 'null') || { 
-    host:'77d9f94ffad94e568e3cdc3c92f4e1ec.s1.eu.hivemq.cloud', 
-    port:8883, 
-    proto:'wss', 
-    user:'computaria', 
-    pass:'Computaria1', 
-    baseTopic:'horta' 
-  },
+  mqtt: JSON.parse(localStorage.getItem('h_mqtt') || 'null') || DEFAULT_MQTT,
   theme: localStorage.getItem('h_theme') || 'dark',
   agendaTimer: null,
 };
@@ -933,32 +960,44 @@ function saveMQTTConfig(){
 }
 function connectMQTT(){
   if(!state.mqtt.host){ toast('Configure o broker MQTT primeiro','warn'); navTo('config', document.querySelector('[data-page=config]')); return; }
-  if(mqttClient){ try{ mqttClient.end(); }catch(e){} mqttClient=null; }
+  if(mqttClient){ try{ mqttClient.end(true); } catch(e){} mqttClient=null; }
   const { host, port, proto, user, pass } = state.mqtt;
-  log(`Conectando a ${proto}://${host}:${port}`, 'MQTT');
+  // HiveMQ Cloud: WSS na porta 8884 com path /mqtt
+  const url = `${proto}://${host}:${port}/mqtt`;
+  log(`Conectando a ${url}`, 'MQTT');
   try{
-    mqttClient = mqtt.connect(`${proto}://${host}:${port}/mqtt`, {
-      username: user, password: pass, clean: false,
-      clientId: 'HortaONG_' + Math.random().toString(16).substr(2,6),
+    mqttClient = mqtt.connect(url, {
+      username: user,
+      password: pass,
+      clean: true,
+      reconnectPeriod: 5000,
+      connectTimeout: 10000,
+      clientId: 'HortaONG_' + Math.random().toString(16).substr(2,8),
       rejectUnauthorized: false
     });
     mqttClient.on('connect', ()=>{
       setMQTTStatus(true);
-      log('MQTT conectado!', 'MQTT');
-      toast('MQTT Conectado');
+      log('MQTT conectado ao HiveMQ!', 'MQTT');
+      toast('MQTT Conectado ✅');
       subscribeAll();
     });
-    mqttClient.on('error', e=>{ log('Erro MQTT: '+e.message,'ERROR'); setMQTTStatus(false); });
+    mqttClient.on('error', e=>{ log('Erro MQTT: '+(e.message||e),'ERROR'); setMQTTStatus(false); });
     mqttClient.on('offline', ()=>{ setMQTTStatus(false); log('MQTT offline','WARN'); });
+    mqttClient.on('reconnect', ()=>{ log('Reconectando MQTT...','WARN'); });
+    mqttClient.on('close', ()=>{ setMQTTStatus(false); });
     mqttClient.on('message', onMQTTMessage);
   } catch(e){ log('Falha ao conectar: '+e.message,'ERROR'); }
 }
 function subscribeAll(){
   if(!mqttClient) return;
-  const base = state.mqtt.baseTopic || 'horta';
-  // Subscreve tópicos específicos do ESP
-  mqttClient.subscribe(`${base}/nivel`, e=>{ if(!e) log(`Inscrito em ${base}/nivel`,'MQTT'); });
-  mqttClient.subscribe(`${base}/irrigacao/status`, e=>{ if(!e) log(`Inscrito em ${base}/irrigacao/status`,'MQTT'); });
+  // Assina exatamente os tópicos publicados pelo ESP32
+  const topicos = [TOPICS.nivel, TOPICS.status, 'horta/#'];
+  topicos.forEach(t => {
+    mqttClient.subscribe(t, {qos:1}, e=>{
+      if(!e) log(`Inscrito em ${t}`, 'MQTT');
+      else log(`Falha ao inscrever em ${t}: ${e.message}`, 'ERROR');
+    });
+  });
 }
 function setMQTTStatus(ok){
   document.getElementById('mqttDot').className = 'status-dot' + (ok?' connected':'');
@@ -969,62 +1008,119 @@ function onMQTTMessage(topic, payload){
   log(`[${topic}] ${raw}`, 'MQTT');
   try{
     const d = JSON.parse(raw);
-    // Identifica o ESP principal
-    let espId = 'ESP_HORTA_01';
-    if(!state.esps[espId]) state.esps[espId] = { topic: state.mqtt.baseTopic, desc:'ESP32 Horta', status:'OFF', nivel:0 };
-    const esp = state.esps[espId];
-    esp.status = 'ON';
-    esp.lastMsg = new Date().toISOString();
-    
-    if(topic.endsWith('/nivel')){
+
+    // ── horta/nivel: {porcentagem, status, distancia_cm}
+    if(topic === TOPICS.nivel){
+      const espId = 'esp32_horta_001';
+      if(!state.esps[espId]) state.esps[espId] = { topic:'horta', desc:'Horta Principal – ESP32', status:'OFF', rssi:0, nivel:0, bombaLigada:false };
+      const esp = state.esps[espId];
+      esp.status = 'ON';
+      esp.lastMsg = new Date().toISOString();
       if(d.porcentagem !== undefined) esp.nivel = d.porcentagem;
-      if(d.distancia_cm !== undefined) esp.distancia = d.distancia_cm;
-      // Atualiza dashboard
-      updateDashboard(espId, { porcentagem: d.porcentagem, rssi: esp.rssi || -65, ip: esp.ip || '192.168.1.100', wifi: esp.wifi || 'HortaNet', uptime: esp.uptime || 'Ativo' });
-      // Registra no histórico
-      const rec = { ts: new Date().toISOString(), esp: espId, nivel: d.porcentagem||0, rssi: esp.rssi||0, ip: esp.ip||'', wifi: esp.wifi||'', uptime: esp.uptime||'', evento: 'leitura' };
+      // Adiciona ao histórico
+      const rec = {
+        ts: new Date().toISOString(), esp: espId,
+        nivel: d.porcentagem || 0, rssi: esp.rssi || 0,
+        ip: esp.ip || '', wifi: esp.wifi || '',
+        uptime: esp.uptime || '', evento: 'nivel',
+        distancia_cm: d.distancia_cm || 0, status_nivel: d.status || ''
+      };
       state.historico.push(rec);
       if(state.historico.length > 2000) state.historico.shift();
       save();
-    } else if(topic.endsWith('/irrigacao/status')){
-      // Atualiza status da bomba
-      if(d.ligado !== undefined) esp.bombaLigada = d.ligado;
-      if(d.timer !== undefined) esp.bombaTimer = d.timer;
-      // Exibe no dashboard (opcional)
-      const statusMsg = d.ligado ? `Bomba LIGADA, timer: ${d.timer}s` : `Bomba DESLIGADA`;
-      log(`Status irrigação: ${statusMsg}`, 'INFO');
-      // Atualiza a UI de controle (pump-status-grid será atualizado via renderControle)
-      renderControle();
+      updateDashboard(espId, { porcentagem: d.porcentagem, rssi: esp.rssi, ip: esp.ip, wifi: esp.wifi, uptime: esp.uptime });
+      if(document.getElementById('pg-historico').classList.contains('active')) renderHistorico();
+      if(state.mqtt.alerts !== false && d.porcentagem < 20){
+        toast(`⚠️ Nível crítico: ${d.porcentagem}%`, 'warn');
+      }
+      return;
     }
+
+    // ── horta/irrigacao/status: {ligado, timer}
+    if(topic === TOPICS.status){
+      const espId = 'esp32_horta_001';
+      if(!state.esps[espId]) return;
+      state.esps[espId].bombaLigada  = d.ligado || false;
+      state.esps[espId].bombaTimer   = d.timer  || 0;
+      state.esps[espId].status = 'ON';
+      state.esps[espId].lastMsg = new Date().toISOString();
+      save();
+      renderDashEsps();
+      renderControle();
+      const badge = d.ligado ? '💧 Bomba LIGADA' : '⏸️ Bomba DESLIGADA';
+      log(`[Status Bomba] ${badge} | timer=${d.timer}s`, 'INFO');
+      // Atualiza o card de status da bomba no dashboard
+      updateBombaStatus(espId, d.ligado, d.timer);
+      return;
+    }
+
+    // ── outros tópicos horta/* (compatibilidade retroativa)
+    const espId = d.id || topic.split('/')[1] || 'desconhecido';
+    if(!state.esps[espId]) state.esps[espId] = { topic, desc:'Auto-detectado', status:'OFF', nivel:0 };
+    const esp = state.esps[espId];
+    esp.status = 'ON'; esp.lastMsg = new Date().toISOString();
+    if(d.porcentagem !== undefined) esp.nivel = d.porcentagem;
+    if(d.rssi  !== undefined) esp.rssi  = d.rssi;
+    if(d.ip    !== undefined) esp.ip    = d.ip;
+    if(d.wifi  !== undefined) esp.wifi  = d.wifi;
+    if(d.uptime!== undefined) esp.uptime= d.uptime;
+    save();
+    updateDashboard(espId, d);
     if(document.getElementById('pg-historico').classList.contains('active')) renderHistorico();
-    // Atualiza tabelas de ESPs
-    renderDashEsps();
-    renderEsps();
   } catch(e){ log('Payload inválido: '+e.message,'WARN'); }
 }
 function sendCmd(acao){
-  const espId = document.getElementById('ctrl-esp').value;
-  const dur = parseInt(document.getElementById('ctrl-dur').value);
-  const esp = state.esps[espId];
-  if(!esp){ toast('Selecione um ESP','warn'); return; }
-  // O ESP espera comando no tópico fixo: horta/irrigacao/cmd
-  const topic = `${state.mqtt.baseTopic}/irrigacao/cmd`;
-  let payload = {};
-  if(acao === 'ligar'){
-    payload = { acao: 'ligar', duracao_min: dur };
-  } else if(acao === 'desligar'){
-    payload = { acao: 'desligar' };
-  } else if(acao === 'status'){
-    payload = { acao: 'status' };
-  }
+  const dur = parseInt(document.getElementById('ctrl-dur').value) || 5;
+  // Publica direto no tópico de comando do ESP (fixo conforme firmware)
+  const topic   = TOPICS.cmd;
+  const payload = JSON.stringify({ acao, duracao_min: dur });
   if(mqttClient && mqttClient.connected){
-    mqttClient.publish(topic, JSON.stringify(payload));
-    log(`Enviado [${topic}]: ${JSON.stringify(payload)}`, 'MQTT');
-    toast(`Comando "${acao}" enviado para ${espId}`);
+    mqttClient.publish(topic, payload, {qos:1});
+    log(`Enviado [${topic}]: ${payload}`, 'MQTT');
+    toast(`Comando "${acao}" enviado`);
   } else {
-    log(`[SIMULADO] [${topic}]: ${JSON.stringify(payload)}`, 'WARN');
-    toast('MQTT desconectado – simulando','warn');
+    log(`[MQTT DESCONECTADO] Tentativa de envio: ${payload}`, 'WARN');
+    toast('MQTT desconectado – conecte primeiro','warn');
   }
+}
+function sendCmdTo(espId, acao, dur){
+  const topic   = TOPICS.cmd;
+  const payload = JSON.stringify({ acao, duracao_min: dur || 5 });
+  if(mqttClient && mqttClient.connected){
+    mqttClient.publish(topic, payload, {qos:1});
+    log(`Cmd ${acao} → ${espId} [${topic}]`, 'MQTT');
+    toast(`${acao} enviado para ${espId}`);
+  } else {
+    log(`[MQTT DESCONECTADO] Cmd ${acao} → ${espId}`, 'WARN');
+    toast('MQTT desconectado','warn');
+  }
+}
+// Sincroniza agendamentos do site → ESP via horta/agendamento
+function sendAgendaToESP(){
+  if(!mqttClient || !mqttClient.connected){ toast('MQTT desconectado','warn'); return; }
+  // Converte agenda do site para o formato do firmware
+  const lista = state.agenda.filter(a=>a.ativo).map(a=>{
+    const [hora, minuto] = (a.hora||'00:00').split(':').map(Number);
+    return { hora, minuto, duracao_min: a.dur||5, ativo: a.ativo };
+  }).slice(0,4); // ESP suporta até 4
+  mqttClient.publish(TOPICS.agenda, JSON.stringify(lista), {qos:1, retain:true});
+  log(`Agendamentos sincronizados com o ESP (${lista.length} itens)`, 'MQTT');
+  toast(`${lista.length} agendamento(s) enviado(s) ao ESP`);
+}
+// Solicita status atual da bomba via tópico de nível (ESP publica periodicamente)
+function requestStatus(){
+  log('Status solicitado – aguardando publicação do ESP...', 'INFO');
+  toast('Aguardando resposta do ESP...', 'info');
+}
+// Atualiza card de status da bomba no controle
+function updateBombaStatus(espId, ligado, timer){
+  const icon  = document.getElementById('bomba-icon');
+  const label = document.getElementById('bomba-status-label');
+  const badge = document.getElementById('bomba-badge');
+  if(icon)  icon.textContent  = ligado ? '💧' : '⏸️';
+  if(badge){ badge.textContent = ligado ? 'ON' : 'OFF'; badge.className = `badge badge-${ligado?'green':'red'}`; }
+  if(label) label.textContent = ligado ? `Ligada${timer>0?' – '+timer+'s restantes':''}` : 'Desligada';
+  renderControle();
 }
 function sendCustom(){
   const topic = document.getElementById('custom-topic').value;
@@ -1100,9 +1196,7 @@ function renderDashEsps(){
     </tr>
   `).join('');
 }
-function sendCmdTo(espId, acao){
-  sendCmd(acao);
-}
+// sendCmdTo já definida acima junto com sendCmd
 
 // ===================== MINI CHART =====================
 function initMiniChart(){
@@ -1242,11 +1336,13 @@ function renderControle(){
   grid.innerHTML = Object.entries(state.esps).map(([id,e])=>`
     <div class="card" style="text-align:center">
       <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${id}</div>
-      <div style="font-size:30px">${e.bombaLigada ? '💧' : '⏸️'}</div>
-      <div class="badge badge-${e.bombaLigada ? 'green':'red'}" style="margin:6px auto">${e.bombaLigada ? 'Ligada' : 'Desligada'}</div>
+      <div style="font-size:30px">${e.bombaLigada?'💧':'⏸️'}</div>
+      <div style="font-size:12px;color:var(--text3);margin:4px 0">${e.status==='ON'?'🟢 Online':'🔴 Offline'}</div>
+      <div class="badge badge-${e.bombaLigada?'green':'red'}" style="margin:6px auto">${e.bombaLigada?'LIGADA':'DESLIGADA'}</div>
+      ${e.bombaTimer>0?`<div style="font-size:11px;color:var(--yellow);margin-top:4px">⏱ ${e.bombaTimer}s restantes</div>`:''}
       <div style="display:flex;gap:4px;justify-content:center;margin-top:8px">
-        <button class="btn btn-primary btn-sm" onclick="sendCmd('ligar')">Ligar</button>
-        <button class="btn btn-danger btn-sm" onclick="sendCmd('desligar')">Desligar</button>
+        <button class="btn btn-primary btn-sm" onclick="sendCmdTo('${id}','ligar',5)">💧 Ligar</button>
+        <button class="btn btn-danger btn-sm" onclick="sendCmdTo('${id}','desligar',0)">🛑 Desligar</button>
       </div>
     </div>
   `).join('');
@@ -1350,7 +1446,7 @@ function checkAgenda(){
   state.agenda.filter(a=>a.ativo && a.hora===time && (a.days||[]).includes(day)).forEach(a=>{
     log(`⏰ Agendamento disparado: ${a.esp} por ${a.dur}min`, 'INFO');
     toast(`⏰ Irrigação agendada: ${a.esp}`,'info');
-    sendCmd('ligar');
+    sendCmdTo(a.esp,'ligar');
   });
 }
 
@@ -1491,7 +1587,14 @@ function init(){
   clearInterval(state.agendaTimer);
   state.agendaTimer = setInterval(checkAgenda, 30000);
 
-  log('Sistema inicializado', 'INFO');
+  log('Sistema inicializado – Horta ONG v2.1', 'INFO');
+  log(`Broker configurado: ${state.mqtt.host}:${state.mqtt.port}`, 'INFO');
+
+  // Auto-connect se as credenciais já estiverem salvas
+  if(state.mqtt.host){
+    log('Auto-conectando ao broker MQTT...', 'INFO');
+    setTimeout(connectMQTT, 800);
+  }
 }
 
 function seedDemo(){
