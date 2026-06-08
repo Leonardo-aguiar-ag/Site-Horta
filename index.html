@@ -803,12 +803,19 @@ input:checked+.slider:before{transform:translateX(20px)}
 // ===================== STATE =====================
 let state = {
   esps: JSON.parse(localStorage.getItem('h_esps') || 'null') || {
-    'ESP_HORTA_01': { topic:'horta/esp01', desc:'Canteiro Principal', status:'OFF', rssi:0, ip:'', wifi:'', uptime:'', lastMsg:null, nivel:0 }
+    'ESP_HORTA_01': { topic:'horta', desc:'ESP32 Horta', status:'OFF', rssi:0, ip:'', wifi:'', uptime:'', lastMsg:null, nivel:0 }
   },
   historico: JSON.parse(localStorage.getItem('h_hist') || '[]'),
   agenda: JSON.parse(localStorage.getItem('h_agenda') || '[]'),
   logs: JSON.parse(localStorage.getItem('h_logs') || '[]'),
-  mqtt: JSON.parse(localStorage.getItem('h_mqtt') || 'null') || { host:'', port:8883, proto:'wss', user:'', pass:'', baseTopic:'horta' },
+  mqtt: JSON.parse(localStorage.getItem('h_mqtt') || 'null') || { 
+    host:'77d9f94ffad94e568e3cdc3c92f4e1ec.s1.eu.hivemq.cloud', 
+    port:8883, 
+    proto:'wss', 
+    user:'computaria', 
+    pass:'Computaria1', 
+    baseTopic:'horta' 
+  },
   theme: localStorage.getItem('h_theme') || 'dark',
   agendaTimer: null,
 };
@@ -926,13 +933,14 @@ function saveMQTTConfig(){
 }
 function connectMQTT(){
   if(!state.mqtt.host){ toast('Configure o broker MQTT primeiro','warn'); navTo('config', document.querySelector('[data-page=config]')); return; }
-  if(mqttClient){ mqttClient.end(); mqttClient=null; }
+  if(mqttClient){ try{ mqttClient.end(); }catch(e){} mqttClient=null; }
   const { host, port, proto, user, pass } = state.mqtt;
   log(`Conectando a ${proto}://${host}:${port}`, 'MQTT');
   try{
     mqttClient = mqtt.connect(`${proto}://${host}:${port}/mqtt`, {
       username: user, password: pass, clean: false,
-      clientId: 'HortaONG_' + Math.random().toString(16).substr(2,6)
+      clientId: 'HortaONG_' + Math.random().toString(16).substr(2,6),
+      rejectUnauthorized: false
     });
     mqttClient.on('connect', ()=>{
       setMQTTStatus(true);
@@ -948,7 +956,9 @@ function connectMQTT(){
 function subscribeAll(){
   if(!mqttClient) return;
   const base = state.mqtt.baseTopic || 'horta';
-  mqttClient.subscribe(`${base}/#`, e=>{ if(!e) log(`Inscrito em ${base}/#`,'MQTT'); });
+  // Subscreve tópicos específicos do ESP
+  mqttClient.subscribe(`${base}/nivel`, e=>{ if(!e) log(`Inscrito em ${base}/nivel`,'MQTT'); });
+  mqttClient.subscribe(`${base}/irrigacao/status`, e=>{ if(!e) log(`Inscrito em ${base}/irrigacao/status`,'MQTT'); });
 }
 function setMQTTStatus(ok){
   document.getElementById('mqttDot').className = 'status-dot' + (ok?' connected':'');
@@ -959,37 +969,60 @@ function onMQTTMessage(topic, payload){
   log(`[${topic}] ${raw}`, 'MQTT');
   try{
     const d = JSON.parse(raw);
-    const espId = d.id || topic.split('/')[1] || 'desconhecido';
-    if(!state.esps[espId]) state.esps[espId] = { topic, desc:'Auto-detectado', status:'OFF', nivel:0 };
+    // Identifica o ESP principal
+    let espId = 'ESP_HORTA_01';
+    if(!state.esps[espId]) state.esps[espId] = { topic: state.mqtt.baseTopic, desc:'ESP32 Horta', status:'OFF', nivel:0 };
     const esp = state.esps[espId];
     esp.status = 'ON';
     esp.lastMsg = new Date().toISOString();
-    if(d.porcentagem !== undefined) esp.nivel = d.porcentagem;
-    if(d.rssi !== undefined) esp.rssi = d.rssi;
-    if(d.ip !== undefined) esp.ip = d.ip;
-    if(d.wifi !== undefined) esp.wifi = d.wifi;
-    if(d.uptime !== undefined) esp.uptime = d.uptime;
-    const rec = { ts: new Date().toISOString(), esp: espId, nivel: d.porcentagem||0, rssi: d.rssi||0, ip: d.ip||'', wifi: d.wifi||'', uptime: d.uptime||'', evento: d.evento||'leitura' };
-    state.historico.push(rec);
-    if(state.historico.length > 2000) state.historico.shift();
-    save();
-    updateDashboard(espId, d);
+    
+    if(topic.endsWith('/nivel')){
+      if(d.porcentagem !== undefined) esp.nivel = d.porcentagem;
+      if(d.distancia_cm !== undefined) esp.distancia = d.distancia_cm;
+      // Atualiza dashboard
+      updateDashboard(espId, { porcentagem: d.porcentagem, rssi: esp.rssi || -65, ip: esp.ip || '192.168.1.100', wifi: esp.wifi || 'HortaNet', uptime: esp.uptime || 'Ativo' });
+      // Registra no histórico
+      const rec = { ts: new Date().toISOString(), esp: espId, nivel: d.porcentagem||0, rssi: esp.rssi||0, ip: esp.ip||'', wifi: esp.wifi||'', uptime: esp.uptime||'', evento: 'leitura' };
+      state.historico.push(rec);
+      if(state.historico.length > 2000) state.historico.shift();
+      save();
+    } else if(topic.endsWith('/irrigacao/status')){
+      // Atualiza status da bomba
+      if(d.ligado !== undefined) esp.bombaLigada = d.ligado;
+      if(d.timer !== undefined) esp.bombaTimer = d.timer;
+      // Exibe no dashboard (opcional)
+      const statusMsg = d.ligado ? `Bomba LIGADA, timer: ${d.timer}s` : `Bomba DESLIGADA`;
+      log(`Status irrigação: ${statusMsg}`, 'INFO');
+      // Atualiza a UI de controle (pump-status-grid será atualizado via renderControle)
+      renderControle();
+    }
     if(document.getElementById('pg-historico').classList.contains('active')) renderHistorico();
+    // Atualiza tabelas de ESPs
+    renderDashEsps();
+    renderEsps();
   } catch(e){ log('Payload inválido: '+e.message,'WARN'); }
 }
 function sendCmd(acao){
   const espId = document.getElementById('ctrl-esp').value;
-  const dur = document.getElementById('ctrl-dur').value;
+  const dur = parseInt(document.getElementById('ctrl-dur').value);
   const esp = state.esps[espId];
   if(!esp){ toast('Selecione um ESP','warn'); return; }
-  const topic = esp.topic + '/cmd';
-  const payload = JSON.stringify({ acao, duracao: parseInt(dur) });
+  // O ESP espera comando no tópico fixo: horta/irrigacao/cmd
+  const topic = `${state.mqtt.baseTopic}/irrigacao/cmd`;
+  let payload = {};
+  if(acao === 'ligar'){
+    payload = { acao: 'ligar', duracao_min: dur };
+  } else if(acao === 'desligar'){
+    payload = { acao: 'desligar' };
+  } else if(acao === 'status'){
+    payload = { acao: 'status' };
+  }
   if(mqttClient && mqttClient.connected){
-    mqttClient.publish(topic, payload);
-    log(`Enviado [${topic}]: ${payload}`, 'MQTT');
-    toast(`Comando "${acao}" enviado`);
+    mqttClient.publish(topic, JSON.stringify(payload));
+    log(`Enviado [${topic}]: ${JSON.stringify(payload)}`, 'MQTT');
+    toast(`Comando "${acao}" enviado para ${espId}`);
   } else {
-    log(`[SIMULADO] [${topic}]: ${payload}`, 'WARN');
+    log(`[SIMULADO] [${topic}]: ${JSON.stringify(payload)}`, 'WARN');
     toast('MQTT desconectado – simulando','warn');
   }
 }
@@ -1068,12 +1101,7 @@ function renderDashEsps(){
   `).join('');
 }
 function sendCmdTo(espId, acao){
-  const esp = state.esps[espId];
-  if(!esp) return;
-  const topic = esp.topic + '/cmd';
-  if(mqttClient && mqttClient.connected) mqttClient.publish(topic, JSON.stringify({ acao }));
-  log(`Cmd ${acao} → ${espId}`, 'MQTT');
-  toast(`${acao} enviado para ${espId}`);
+  sendCmd(acao);
 }
 
 // ===================== MINI CHART =====================
@@ -1214,11 +1242,11 @@ function renderControle(){
   grid.innerHTML = Object.entries(state.esps).map(([id,e])=>`
     <div class="card" style="text-align:center">
       <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${id}</div>
-      <div style="font-size:30px">${e.status==='ON'?'💧':'⏸️'}</div>
-      <div class="badge badge-${e.status==='ON'?'green':'red'}" style="margin:6px auto">${e.status}</div>
+      <div style="font-size:30px">${e.bombaLigada ? '💧' : '⏸️'}</div>
+      <div class="badge badge-${e.bombaLigada ? 'green':'red'}" style="margin:6px auto">${e.bombaLigada ? 'Ligada' : 'Desligada'}</div>
       <div style="display:flex;gap:4px;justify-content:center;margin-top:8px">
-        <button class="btn btn-primary btn-sm" onclick="sendCmdTo('${id}','ligar')">Ligar</button>
-        <button class="btn btn-danger btn-sm" onclick="sendCmdTo('${id}','desligar')">Desligar</button>
+        <button class="btn btn-primary btn-sm" onclick="sendCmd('ligar')">Ligar</button>
+        <button class="btn btn-danger btn-sm" onclick="sendCmd('desligar')">Desligar</button>
       </div>
     </div>
   `).join('');
@@ -1322,7 +1350,7 @@ function checkAgenda(){
   state.agenda.filter(a=>a.ativo && a.hora===time && (a.days||[]).includes(day)).forEach(a=>{
     log(`⏰ Agendamento disparado: ${a.esp} por ${a.dur}min`, 'INFO');
     toast(`⏰ Irrigação agendada: ${a.esp}`,'info');
-    sendCmdTo(a.esp,'ligar');
+    sendCmd('ligar');
   });
 }
 
